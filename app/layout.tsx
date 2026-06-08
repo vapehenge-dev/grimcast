@@ -14,9 +14,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GrimCast",
-  description: "Real weather. Bad attitude.",
+  title: "GrimCast | Real Weather. Bad Attitude.",
+  description: "Weather forecasts with zero sugar coating.",
   manifest: "/manifest.webmanifest",
+  openGraph: {
+    title: "GrimCast | Real Weather. Bad Attitude.",
+    description: "Weather forecasts with zero sugar coating.",
+    siteName: "GrimCast",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "GrimCast | Real Weather. Bad Attitude.",
+    description: "Weather forecasts with zero sugar coating.",
+  },
 };
 
 export default function RootLayout({
