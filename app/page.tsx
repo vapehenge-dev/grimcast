@@ -830,6 +830,25 @@ function isValidWeatherData(data: any) {
   );
 }
 
+function getDateKey(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  return date.toLocaleDateString("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function getTimeLabel(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  return date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 
 export default function Page() {
   const [weather, setWeather] = useState<any>(null);
@@ -870,6 +889,9 @@ export default function Page() {
         }
 
         setWeather(data);
+            if (data.placeName) {
+              setLocation(data.placeName);
+            }
         setLoading(false);
       })
       .catch(() => {
@@ -905,6 +927,9 @@ export default function Page() {
         }
 
         setWeather(data);
+            if (data.placeName) {
+              setLocation(data.placeName);
+            }
         setLoading(false);
         setMapPickerOpen(false);
         setMapMessage("Tap anywhere in Britain or Northern Ireland to pick a location.");
@@ -970,6 +995,9 @@ export default function Page() {
             }
 
             setWeather(data);
+            if (data.placeName) {
+              setLocation(data.placeName);
+            }
             setLoading(false);
           })
           .catch(() => {
@@ -1176,6 +1204,9 @@ else if (rain >= 70) score -= 7;
             }
 
             setWeather(data);
+            if (data.placeName) {
+              setLocation(data.placeName);
+            }
             setLoading(false);
           })
           .catch(() => {
@@ -1322,8 +1353,12 @@ useEffect(() => {
 
   const grimScore = getGrimScore(todayTemp, todayRain, todayWind, currentCode);
 
-  // OpenWeather's free forecast is 3-hourly. 8 blocks = roughly the next 24 hours.
-  const hourlyWindow = weather.hourly.time.slice(0, 8).map((hour: string, index: number) => {
+  // OpenWeather's free forecast is 3-hourly.
+  // For the Today briefing, only use forecast blocks from today.
+  // This stops tomorrow's weather being dragged into today's summary.
+  const todayDateKey = getDateKey(new Date());
+
+  const allHourlyItems = weather.hourly.time.map((hour: string, index: number) => {
     const hourRain = weather.hourly.precipitation_probability[index] || 0;
     const hourWind = weather.hourly.wind_speed_10m[index] || 0;
     const hourTemp = weather.hourly.temperature_2m[index] || currentTemp;
@@ -1339,24 +1374,45 @@ useEffect(() => {
     };
   });
 
+  const todayHourlyItems = allHourlyItems.filter((item: any) => {
+    return getDateKey(item.hour) === todayDateKey;
+  });
+
+  const hourlyWindow =
+    todayHourlyItems.length > 0
+      ? todayHourlyItems
+      : [
+          {
+            hour: new Date().toISOString(),
+            rain: todayRain,
+            wind: todayWind,
+            temp: currentTemp,
+            code: currentCode,
+            misery:
+              todayRain * 2 +
+              todayWind * 1.3 +
+              Math.max(0, 8 - currentTemp) * 4,
+          },
+        ];
+
   const worstHour = hourlyWindow.reduce((worst: any, item: any) => {
     return item.misery > worst.misery ? item : worst;
   }, hourlyWindow[0]);
 
-  const worstHourTime = new Date(worstHour.hour).toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const worstHourTime = getTimeLabel(worstHour.hour);
 
   const nextFewHours = hourlyWindow.slice(0, 3);
   const nextFewHoursRain = Math.max(...nextFewHours.map((item: any) => item.rain || 0));
   const nextFewHoursWind = Math.max(...nextFewHours.map((item: any) => item.wind || 0));
   const rainNowScore = currentLooksWet ? 100 : 0;
 
-  // For the main briefing, judge the day by the nastiest realistic spell.
-  // For beer garden, judge now + the next few hours so it does not say 10/10 before a soaking.
-  const effectiveRain = Math.max(todayRain, worstHour.rain || 0);
-  const effectiveWind = Math.max(todayWind, worstHour.wind || 0);
+  // For Today's briefing, judge from now until midnight only.
+  // Do not include tomorrow's forecast blocks here.
+  const todayOnlyRain = Math.max(...hourlyWindow.map((item: any) => item.rain || 0));
+  const todayOnlyWind = Math.max(...hourlyWindow.map((item: any) => item.wind || 0));
+
+  const effectiveRain = Math.max(currentLooksWet ? 100 : 0, todayOnlyRain);
+  const effectiveWind = Math.max(currentWind || 0, todayOnlyWind);
   const effectiveCode = worstHour.rain >= 45 ? worstHour.code : currentCode;
 
   const beerRain = Math.max(rainNowScore, nextFewHoursRain);
@@ -1406,10 +1462,10 @@ useEffect(() => {
   const laterRainLine =
     mainThreat === "rain" || mainThreat === "stormy" || mainThreat === "showery"
       ? effectiveRain >= 45
-        ? `Later: rain risk hits ${effectiveRain}% around ${worstHourTime}.`
-        : `Later: worst rain risk only reaches ${effectiveRain}% around ${worstHourTime}.`
+        ? `Later today: rain risk hits ${effectiveRain}% around ${worstHourTime}.`
+        : `Later today: worst rain risk only reaches ${effectiveRain}% around ${worstHourTime}.`
       : mainThreat === "wind"
-      ? `Later: wind is the main nuisance, peaking around ${worstHourTime}.`
+      ? `Later today: wind is the main nuisance, peaking around ${worstHourTime}.`
       : mainThreat === "hot"
       ? `Today: heat is the main nuisance at ${Math.round(currentTemp)}°C.`
       : mainThreat === "cold"
@@ -1422,7 +1478,7 @@ useEffect(() => {
     briefingHeadline = savage
       ? "The wind is the annoying bastard today."
       : "Wind is the main problem today.";
-    briefingDetail = `${currentLine} Later: wind peaks around ${worstHourTime}. Rain is not running this show today; the air is.`;
+    briefingDetail = `${currentLine} Later today: wind peaks around ${worstHourTime}. Rain is not running this show today; the air is.`;
     briefingAdvice = savage
       ? "Secure anything loose and accept that your hair has lost."
       : "Zip up, secure loose stuff, and expect the wind to make simple things annoying.";
@@ -1460,7 +1516,7 @@ useEffect(() => {
     } else if (mainThreat === "rain" && !currentLooksWet && effectiveRain >= 80) {
       briefingHeadline = "Dry now, but the sky has plans.";
       briefingDetail =
-        `${currentLine} ${laterRainLine} So no, GrimCast is not saying it is pouring this second. It is saying the forecast later looks ready to ruin sleeves.`;
+        `${currentLine} ${laterRainLine} So no, GrimCast is not saying it is pouring this second. It looks dry now, but rain is forecast later today. Do not trust the smug little sky.`;
       briefingAdvice =
         "Enjoy the dry bit, but keep a proper coat nearby unless you like surprise soakings.";
     } else if (mainThreat === "rain" && effectiveRain >= 80) {
@@ -1554,8 +1610,8 @@ useEffect(() => {
         : "Dry now, but the sky is getting ready to lose its shit.";
       briefingDetail =
         currentLooksWet
-          ? `Right now: it is wet in ${weather.placeName}. Later: rain risk still hits ${effectiveRain}% around ${worstHourTime}. Your plans have been reviewed by the weather and told to get fucked.`
-          : `Right now: it looks dry in ${weather.placeName}. Later: rain risk hits ${effectiveRain}% around ${worstHourTime}. So enjoy the nice bit while it lasts, because the sky has a bucket hidden behind its back.`;
+          ? `Right now: it is wet in ${weather.placeName}. Later today: rain risk still hits ${effectiveRain}% around ${worstHourTime}. Your plans have been reviewed by the weather and told to get fucked.`
+          : `Right now: it looks dry in ${weather.placeName}. Later today: rain risk hits ${effectiveRain}% around ${worstHourTime}. So enjoy the nice bit while it lasts, because the sky has a bucket hidden behind its back.`;
       briefingAdvice =
         currentLooksWet
           ? "Take a proper coat. Not a hoodie. A hoodie is just wet fabric with confidence."
@@ -1599,7 +1655,7 @@ useEffect(() => {
     }
   }
 
-  const shareText = `☠️ GRIMCAST\n\n${weather.placeName}\n${Math.round(currentTemp)}°C · ${currentConditionLabel}\nRight now: ${dryNowText}\nWind: ${effectiveWind} km/h\nGrim Score: ${grimScore}/10\nBeer Garden Score: ${beerScore}/10\n\n${briefingHeadline}\n${briefingDetail}\n\nWorst period: ${worstHourTime}\nChance of staying dry: ${dryChance}%`;
+  const shareText = `☠️ GRIMCAST\n\n${weather.placeName}\n${Math.round(currentTemp)}°C · ${currentConditionLabel}\nRight now: ${dryNowText}\nWind: ${effectiveWind} km/h\nGrim Score: ${grimScore}/10\nBeer Garden Score: ${beerScore}/10\n\n${briefingHeadline}\n${briefingDetail}\n\nWorst period today: ${worstHourTime}\nChance of staying dry: ${dryChance}%`;
  async function createShareCardFile() {
     const canvas = document.createElement("canvas");
     canvas.width = 1080;
@@ -1786,18 +1842,29 @@ const roundedRect = (
     await copyShareText();
   }
 
-  async function shareMisery() {
-    const cardFile = await createShareCardFile();
+ async function shareMisery() {
+  const cardFile = await createShareCardFile();
 
-    if (!cardFile) {
-      await copyShareText();
+  if (
+    cardFile &&
+    navigator.share &&
+    (!(navigator as any).canShare ||
+      (navigator as any).canShare({ files: [cardFile] }))
+  ) {
+    try {
+      await navigator.share({
+        title: "☠️ GrimCast",
+        text: shareText,
+        files: [cardFile],
+      });
       return;
+    } catch {
+      // If image share fails, open the fallback panel.
     }
-
-    // Open our own share panel first so the user always sees the actual card.
-    // The phone's native share sheet is still available inside the panel.
-    openSharePanel(cardFile);
   }
+
+  openSharePanel(cardFile);
+}
 
   const background = getBackground(currentCode, currentLooksWet ? 100 : todayRain, currentTemp);
   const currentWeatherName = getWeatherName(currentCode).toLowerCase();
@@ -1979,6 +2046,9 @@ const roundedRect = (
                       }
 
                       setWeather(data);
+            if (data.placeName) {
+              setLocation(data.placeName);
+            }
                       setLoading(false);
                     })
                     .catch(() => {
